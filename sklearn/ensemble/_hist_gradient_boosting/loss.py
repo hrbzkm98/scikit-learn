@@ -371,6 +371,72 @@ class CategoricalCrossEntropy(BaseLoss):
                        logsumexp(raw_predictions, axis=0)[np.newaxis, :])
         return proba.T
 
+class OrdinalAllThreshold(BaseLoss):
+
+    need_update_leaves_values = True
+    hessians_are_constant = False
+
+    def __call__(self, y_true, raw_predictions, average=True):
+        n_samples = y_true.shape[0]
+        loss = np.empty(shape=n_samples, dtype=Y_DTYPE)
+        _AT_objective(loss, y_true, raw_predictions.ravel(), self.theta)
+        return loss.mean() if average else loss
+
+    def get_baseline_prediction(self, y_train, prediction_dim):
+        # initialize thresholds
+        x0 = np.zeros(prediction_dim, dtype=np.float64)
+        x0[0] = np.mean(y_train)
+        x0[1:] = np.arange(prediction_dim - 1)
+        A = np.zeros((prediction_dim-1, prediction_dim), dtype=np.float64)
+        _get_linear_constraint(A)
+        linear_constraint = LinearConstraint(A, [-np.inf] * (prediction_dim-1),
+                                             [np.inf] + [0] * (prediction_dim-2))
+        sol = minimize(_loss_AT, x0, method='trust-constr', jac=_jac_AT,
+                       hess=_hess_AT, args=(y_train,), tol=1e-12)
+        if not sol.success:
+            warnings.warn("Baseline initialization fails to converge.")
+
+        init_value = sol.x[0]
+        self.theta = sol.x[1:]
+        return init_value
+
+    def init_gradients_and_hessians(self, n_samples, prediction_dim):
+        shape = (prediction_dim-1, n_samples)
+        gradients = np.empty(shape=shape, dtype=G_H_DTYPE)
+        hessians = np.empty(shape=shape, dtype=G_H_DTYPE)
+        mixed_partials = np.empty(shape=shape, dtype=G_H_DTYPE)
+        return gradients, hessians, mixed_partials
+
+    def update_gradients_and_hessians(self, gradients,
+                                      hessians, mixed_partials,
+                                      y_true, raw_predictions):
+        raw_predictions = raw_predictions.reshape(-1)
+        _update_gradients_hessians_all_threshold(
+            gradients, hessians, mixed_partials, y_true,
+            raw_predictions, self.theta)
+
+    def get_theta(self):
+        return self.theta
+
+    def set_theta(self, theta):
+        self.theta = theta
+        return
+
+    def update_theta(self, delta):
+        assert delta.shape[0] == self.theta.shape[0], "Incompatible dimension when updating threshold values."
+        self.theta = self.theta + delta
+        return
+
+    def update_leaves_values(self, grower, y_true, raw_predictions):
+        # Update the values predicted by the tree with
+        # median(y_true - raw_predictions).
+        # See note about need_update_leaves_values in BaseLoss.
+
+        # TODO: ideally this should be computed in parallel over the leaves
+        # using something similar to _update_raw_predictions(), but this
+        # requires a cython version of median()
+        grower._finalize_all_leaves()
+        self.update_theta(grower.delta)
 
 _LOSSES = {
     'least_squares': LeastSquares,
