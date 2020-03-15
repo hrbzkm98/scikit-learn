@@ -8,6 +8,7 @@
 cimport cython
 from cython.parallel import prange
 import numpy as np
+from scipy.linalg import toeplitz
 cimport numpy as np
 
 from libc.math cimport exp, fabs, log1p
