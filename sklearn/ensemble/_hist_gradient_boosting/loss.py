@@ -98,7 +98,7 @@ class BaseLoss(ABC):
             hessians = np.ones(shape=(1, 1), dtype=G_H_DTYPE)
         else:
             if self.ordinal_mode:
-                shape[0] = (prediction_dim - 1) * 2
+                shape = ((prediction_dim - 1) * 2, n_samples)
             hessians = np.empty(shape=shape, dtype=G_H_DTYPE)
 
         return gradients, hessians
