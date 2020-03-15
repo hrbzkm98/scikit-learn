@@ -407,6 +407,7 @@ class OrdinalAllThreshold(BaseLoss):
             sample_weight = np.ones(y_train.shape, dtype=Y_DTYPE)
         sol = minimize(_loss_AT, x0, method='trust-constr', jac=_jac_AT,
                        hess=_hess_AT, args=(y_train, sample_weight), tol=1e-12)
+        print(sol)
         if not sol.success:
             warnings.warn("Baseline initialization fails to converge.")
 
