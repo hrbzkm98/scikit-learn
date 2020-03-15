@@ -164,11 +164,10 @@ def _get_linear_constraint(Y_DTYPE_C [:, ::1] A): # OUT
     A[0, 0] = 1.
     A[1:, 1:] = D
 
-@cython.boundscheck(False)
+# @cython.boundscheck(False)
 def _update_gradients_hessians_all_threshold(
         G_H_DTYPE_C [:, ::1] gradients,  # OUT
         G_H_DTYPE_C [:, ::1] hessians,  # OUT
-        G_H_DTYPE_C [:, ::1] mixed_partials,  # OUT
         const Y_DTYPE_C [::1] y_true,  # IN
         const Y_DTYPE_C [::1] raw_predictions,  # IN
         const Y_DTYPE_C [::1] sample_weight,  # IN
@@ -191,7 +190,7 @@ def _update_gradients_hessians_all_threshold(
                 z_i_k = s_i_k * d_i_k
                 gradients[k, i] = -s_i_k * _cexpit(-z_i_k)
                 hessians[k, i] = _sigmdx(z_i_k)
-                mixed_partials[k, i] = _sigsigm(z_i_k)
+                hessians[2*(K-1)+k, i] = _sigsigm(z_i_k)
     else:
         for i in prange(n_samples, schedule='static', nogil=True):
             sw = sample_weight[i]
@@ -201,7 +200,7 @@ def _update_gradients_hessians_all_threshold(
                 z_i_k = s_i_k * d_i_k
                 gradients[k, i] = -s_i_k * _cexpit(-z_i_k) * sw
                 hessians[k, i] = _sigmdx(z_i_k) * sw
-                mixed_partials[k, i] = _sigsigm(z_i_k) * sw
+                hessians[2*(K-1)+k, i] = _sigsigm(z_i_k) * sw
 
 def _AT_objective(
         Y_DTYPE_C [::1] loss,  # OUT

@@ -34,9 +34,8 @@ from ...utils.stats import _weighted_percentile
 
 class BaseLoss(ABC):
     """Base class for a loss."""
-    def __init__(self, hessians_are_constant, ordinal_mode=False):
+    def __init__(self, hessians_are_constant):
         self.hessians_are_constant = hessians_are_constant
-        self.ordinal_mode = ordinal_mode
 
     def __call__(self, y_true, raw_predictions, sample_weight):
         """Return the weighted average loss"""
@@ -56,6 +55,7 @@ class BaseLoss(ABC):
     # Gradient Boosting Machine by Friedman
     # (https://statweb.stanford.edu/~jhf/ftp/trebst.pdf) for the theory.
     need_update_leaves_values = False
+    ordinal_mode = False
 
     def init_gradients_and_hessians(self, n_samples, prediction_dim,
                                     sample_weight):
@@ -87,7 +87,7 @@ class BaseLoss(ABC):
             array is initialized to ``1``. Otherwise, the array is allocated
             without being initialized.
         """
-        shape = (prediction_dim - int(self.ordinal_mode), n_samples)
+        shape = (prediction_dim, n_samples)
         gradients = np.empty(shape=shape, dtype=G_H_DTYPE)
 
         if self.hessians_are_constant:
@@ -97,13 +97,11 @@ class BaseLoss(ABC):
             #   ignored anyway.
             hessians = np.ones(shape=(1, 1), dtype=G_H_DTYPE)
         else:
-            hessians = np.empty(shape=shape, dtype=G_H_DTYPE)
             if self.ordinal_mode:
-                mixed_partials = np.empty(shape=shape, dtype=G_H_DTYPE)
-        if not self.ordinal_mode:
-            return gradients, hessians
-        else:
-            return gradients, hessians, mixed_partials
+                shape[0] = (prediction_dim - 1) * 2
+            hessians = np.empty(shape=shape, dtype=G_H_DTYPE)
+
+        return gradients, hessians
 
     @abstractmethod
     def get_baseline_prediction(self, y_train, sample_weight, prediction_dim):
@@ -385,10 +383,10 @@ class CategoricalCrossEntropy(BaseLoss):
 class OrdinalAllThreshold(BaseLoss):
 
     def __init__(self, sample_weight):
-        super().__init__(hessians_are_constant=False,
-                         ordinal_mode=True)
+        super().__init__(hessians_are_constant=False)
 
     need_update_leaves_values = True
+    ordinal_mode = True
 
     def pointwise_loss(self, y_true, raw_predictions):
         n_samples = y_true.shape[0]
@@ -416,13 +414,12 @@ class OrdinalAllThreshold(BaseLoss):
         self.theta = sol.x[1:]
         return init_value
 
-    def update_gradients_and_hessians(self, gradients, hessians,
-                                      mixed_partials, y_true,
+    def update_gradients_and_hessians(self, gradients, hessians, y_true,
                                       raw_predictions, sample_weight):
         raw_predictions = raw_predictions.reshape(-1)
         _update_gradients_hessians_all_threshold(
-            gradients, hessians, mixed_partials, y_true,
-            raw_predictions, sample_weight, self.theta)
+            gradients, hessians, y_true, raw_predictions,
+            sample_weight, self.theta)
 
     def get_theta(self):
         return self.theta
