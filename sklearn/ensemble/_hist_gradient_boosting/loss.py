@@ -7,9 +7,11 @@ classification.
 # Author: Nicolas Hug
 
 from abc import ABC, abstractmethod
+import warnings
 
 import numpy as np
 from scipy.special import expit
+from scipy.optimize import minimize, LinearConstraint
 try:  # logsumexp was moved from mist to special in 0.19
     from scipy.special import logsumexp
 except ImportError:
@@ -23,6 +25,10 @@ from ._loss import _update_gradients_least_absolute_deviation
 from ._loss import _update_gradients_hessians_least_absolute_deviation
 from ._loss import _update_gradients_hessians_binary_crossentropy
 from ._loss import _update_gradients_hessians_categorical_crossentropy
+from ._loss import _update_gradients_hessians_all_threshold
+from ._loss import _AT_objective
+from ._loss import _loss_AT, _jac_AT, _hess_AT
+from ._loss import _get_linear_constraint
 from ...utils.stats import _weighted_percentile
 
 
