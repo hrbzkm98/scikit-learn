@@ -28,8 +28,9 @@ from ...utils.stats import _weighted_percentile
 
 class BaseLoss(ABC):
     """Base class for a loss."""
-    def __init__(self, hessians_are_constant):
+    def __init__(self, hessians_are_constant, ordinal_mode=False):
         self.hessians_are_constant = hessians_are_constant
+        self.ordinal_mode = ordinal_mode
 
     def __call__(self, y_true, raw_predictions, sample_weight):
         """Return the weighted average loss"""
@@ -80,7 +81,7 @@ class BaseLoss(ABC):
             array is initialized to ``1``. Otherwise, the array is allocated
             without being initialized.
         """
-        shape = (prediction_dim, n_samples)
+        shape = (prediction_dim - int(self.ordinal_mode), n_samples)
         gradients = np.empty(shape=shape, dtype=G_H_DTYPE)
 
         if self.hessians_are_constant:
@@ -91,8 +92,12 @@ class BaseLoss(ABC):
             hessians = np.ones(shape=(1, 1), dtype=G_H_DTYPE)
         else:
             hessians = np.empty(shape=shape, dtype=G_H_DTYPE)
-
-        return gradients, hessians
+            if self.ordinal_mode:
+                mixed_partials = np.empty(shape=shape, dtype=G_H_DTYPE)
+        if not self.ordinal_mode:
+            return gradients, hessians
+        else:
+            return gradients, hessians, mixed_partials
 
     @abstractmethod
     def get_baseline_prediction(self, y_train, sample_weight, prediction_dim):
@@ -373,26 +378,31 @@ class CategoricalCrossEntropy(BaseLoss):
 
 class OrdinalAllThreshold(BaseLoss):
 
-    need_update_leaves_values = True
-    hessians_are_constant = False
+    def __init__(self, sample_weight):
+        super().__init__(hessians_are_constant=False,
+                         ordinal_mode=True)
 
-    def __call__(self, y_true, raw_predictions, average=True):
+    need_update_leaves_values = True
+
+    def pointwise_loss(self, y_true, raw_predictions):
         n_samples = y_true.shape[0]
         loss = np.empty(shape=n_samples, dtype=Y_DTYPE)
         _AT_objective(loss, y_true, raw_predictions.ravel(), self.theta)
-        return loss.mean() if average else loss
+        return loss
 
-    def get_baseline_prediction(self, y_train, prediction_dim):
+    def get_baseline_prediction(self, y_train, sample_weight, prediction_dim):
         # initialize thresholds
-        x0 = np.zeros(prediction_dim, dtype=np.float64)
+        x0 = np.zeros(prediction_dim, dtype=Y_DTYPE)
         x0[0] = np.mean(y_train)
         x0[1:] = np.arange(prediction_dim - 1)
-        A = np.zeros((prediction_dim-1, prediction_dim), dtype=np.float64)
+        A = np.zeros((prediction_dim-1, prediction_dim), dtype=Y_DTYPE)
         _get_linear_constraint(A)
         linear_constraint = LinearConstraint(A, [-np.inf] * (prediction_dim-1),
                                              [np.inf] + [0] * (prediction_dim-2))
+        if sample_weight is None:
+            sample_weight = np.ones(y_train.shape)
         sol = minimize(_loss_AT, x0, method='trust-constr', jac=_jac_AT,
-                       hess=_hess_AT, args=(y_train,), tol=1e-12)
+                       hess=_hess_AT, args=(y_train, sample_weight), tol=1e-12)
         if not sol.success:
             warnings.warn("Baseline initialization fails to converge.")
 
@@ -400,20 +410,13 @@ class OrdinalAllThreshold(BaseLoss):
         self.theta = sol.x[1:]
         return init_value
 
-    def init_gradients_and_hessians(self, n_samples, prediction_dim):
-        shape = (prediction_dim-1, n_samples)
-        gradients = np.empty(shape=shape, dtype=G_H_DTYPE)
-        hessians = np.empty(shape=shape, dtype=G_H_DTYPE)
-        mixed_partials = np.empty(shape=shape, dtype=G_H_DTYPE)
-        return gradients, hessians, mixed_partials
-
-    def update_gradients_and_hessians(self, gradients,
-                                      hessians, mixed_partials,
-                                      y_true, raw_predictions):
+    def update_gradients_and_hessians(self, gradients, hessians,
+                                      mixed_partials, y_true,
+                                      raw_predictions, sample_weight):
         raw_predictions = raw_predictions.reshape(-1)
         _update_gradients_hessians_all_threshold(
             gradients, hessians, mixed_partials, y_true,
-            raw_predictions, self.theta)
+            raw_predictions, sample_weight, self.theta)
 
     def get_theta(self):
         return self.theta
@@ -423,7 +426,9 @@ class OrdinalAllThreshold(BaseLoss):
         return
 
     def update_theta(self, delta):
-        assert delta.shape[0] == self.theta.shape[0], "Incompatible dimension when updating threshold values."
+        if delta.shape[0] != self.theta.shape[0]:
+            raise ValueError(
+                "Incompatible dimension when updating threshold values.")
         self.theta = self.theta + delta
         return
 
@@ -442,5 +447,6 @@ _LOSSES = {
     'least_squares': LeastSquares,
     'least_absolute_deviation': LeastAbsoluteDeviation,
     'binary_crossentropy': BinaryCrossEntropy,
-    'categorical_crossentropy': CategoricalCrossEntropy
+    'categorical_crossentropy': CategoricalCrossEntropy,
+    'ordinal_all_threshold': OrdinalAllThreshold
 }
