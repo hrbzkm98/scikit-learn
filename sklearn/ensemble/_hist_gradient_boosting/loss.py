@@ -87,7 +87,7 @@ class BaseLoss(ABC):
             array is initialized to ``1``. Otherwise, the array is allocated
             without being initialized.
         """
-        shape = (prediction_dim, n_samples)
+        shape = (prediction_dim-int(self.ordinal_mode), n_samples)
         gradients = np.empty(shape=shape, dtype=G_H_DTYPE)
 
         if self.hessians_are_constant:
