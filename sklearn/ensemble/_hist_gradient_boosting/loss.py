@@ -406,7 +406,7 @@ class OrdinalAllThreshold(BaseLoss):
         linear_constraint = LinearConstraint(A, [-np.inf] * (prediction_dim-1),
                                              [np.inf] + [0] * (prediction_dim-2))
         if sample_weight is None:
-            sample_weight = np.ones(y_train.shape)
+            sample_weight = np.ones(y_train.shape, dtype=Y_DTYPE)
         sol = minimize(_loss_AT, x0, method='trust-constr', jac=_jac_AT,
                        hess=_hess_AT, args=(y_train, sample_weight), tol=1e-12)
         if not sol.success:
